@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<title>NOL 인터파크 예매</title>
+<style>
+  body { width: 250px; margin: 20px; font: 15px/1.5 system-ui, sans-serif; }
+  h1 { font-size: 16px; margin: 0; }
+  p { margin: 8px 0 0; }
+  button { margin-top: 10px; padding: 6px 12px; cursor: pointer; }
+</style>
+<h1>NOL 인터파크 일반예매</h1>
+<p id="selection" role="status">확인 중…</p>
+<p id="round" hidden></p>
+<p id="opening"></p>
+<div><button type="button" id="start" disabled>일반예매 대기 시작</button> <button type="button" id="cancel" hidden>대기 취소</button></div>
+<p id="status" role="status"></p>
+<script type="module" src="popup.js"></script>
+</html>
