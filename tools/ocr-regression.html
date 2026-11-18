@@ -1,0 +1,44 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>OCR regression</title>
+<h1>OCR regression</h1>
+<pre id="results">Running…</pre>
+<script src="../extension/vendor/ocr/tesseract.min.js"></script>
+<script type="module">
+import {prepareImage} from '../extension/prepare-image.js';
+const assets = new URL('../extension/vendor/ocr/', location.href).href;
+const results = document.querySelector('#results');
+let worker;
+try {
+  worker = await Tesseract.createWorker('eng', 1, {
+    workerPath: assets + 'worker.min.js', corePath: assets, langPath: assets, workerBlobURL: false,
+  });
+  await worker.setParameters({tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE});
+  const cases = [];
+  for (const [name, expected] of [['previous', 'BLKPKU'], ['new', 'SRCNNS']]) {
+    for (const scale of [1, 2]) cases.push({name: `${name}-${scale}`, source: `fixtures/${name}-${scale}.png`, expected});
+  }
+  for (const [background, ink, line] of [['white','black','red'], ['#241144','#44ddaa','#ffbb22'], ['#eeeedd','#223388','#bb3366']]) {
+    const canvas = document.createElement('canvas'); canvas.width = 420; canvas.height = 100;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = background; ctx.fillRect(0, 0, 420, 100);
+    ctx.fillStyle = ink; ctx.font = 'bold 48px Arial'; ctx.fillText('ABC123', 30, 70);
+    ctx.strokeStyle = line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(10, 46); ctx.lineTo(400, 46); ctx.stroke();
+    cases.push({name: `synthetic-${background}`, source: canvas.toDataURL(), expected: 'ABC123'});
+  }
+  const report = [];
+  for (const test of cases) {
+    const prepared = await prepareImage(test.source);
+    const {data} = await worker.recognize(prepared);
+    const actual = data.text.replace(/[^A-Za-z0-9]/g, '');
+    report.push({name:test.name, expected:test.expected, actual, passed:actual === test.expected});
+    results.textContent = JSON.stringify(report, null, 2);
+  }
+  document.body.dataset.result = report.every(row => row.passed) ? 'pass' : 'fail';
+} catch (error) {
+  results.textContent = error instanceof Error ? error.stack : String(error);
+  document.body.dataset.result = 'error';
+} finally {
+  if (worker) await worker.terminate();
+}
+</script>

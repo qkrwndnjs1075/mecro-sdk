@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Automatic input regression</title>
+<pre id="report">Running…</pre>
+<div class="ModalCaptchaText_layerWrap_test">
+  <div class="ModalCaptchaText_captchaImage_test"><img width="210" height="70" alt="캡챠 이미지"></div>
+  <input class="ModalCaptchaText_captchaInput_test">
+  <button id="submit" type="button">입력완료</button>
+</div>
+<script src="../extension/capture-source.js"></script>
+<script type="module">
+const report = document.querySelector('#report');
+const messages = [];
+const receivers = [];
+const disconnects = [];
+let starts = 0, inputs = 0, changes = 0, clicks = 0;
+globalThis.chrome = {runtime: {
+  connect: () => ({postMessage: message => messages.push(message), onMessage: {addListener: fn => receivers.push(fn)}, onDisconnect: {addListener: fn => disconnects.push(fn)}}),
+  sendMessage: async () => {starts++; return {opened:true};},
+}};
+const input = document.querySelector('input');
+const img = document.querySelector('img');
+const root = document.querySelector('.ModalCaptchaText_layerWrap_test');
+const canvas = document.createElement('canvas');canvas.width = 210;canvas.height = 70;
+const ctx = canvas.getContext('2d');ctx.fillRect(0,0,210,70);
+const first = canvas.toDataURL();ctx.fillStyle='white';ctx.fillRect(0,0,210,70);const second = canvas.toDataURL();
+const tick = () => new Promise(resolve => requestAnimationFrame(resolve));
+const check = (condition, label) => {if (!condition) throw Error(label);};
+const latest = () => messages.filter(message => 'source' in message).at(-1);
+const fill = (job, text) => receivers[0]({op:'fill',...job,text});
+input.addEventListener('input', () => inputs++);
+input.addEventListener('change', () => changes++);
+document.querySelector('#submit').addEventListener('click', () => clicks++);
+try {
+  observePopupImage();observePopupImage('test');
+  await tick();check(starts === 0, 'No popup must not start OCR');
+  img.src = first;await tick();check(starts === 1, 'Popup must automatically request OCR');
+  const firstJob = latest();fill(firstJob,'ABC123');
+  check(input.value === 'ABC123' && inputs === 1 && changes === 1, 'Fill must update value and dispatch framework events');
+  img.src = second;await tick();check(input.value === '', 'New image clears previous automatic value');
+  fill(firstJob,'STALE');check(input.value === '', 'Old result must not fill new image');
+  fill(latest(),'DEF456');check(input.value === 'DEF456', 'New image gets its own result');
+  img.src = first;await tick();input.value='MANUAL';fill(latest(),'OVERWRITE');check(input.value === 'MANUAL', 'Manual input must survive');
+  input.value='';img.src=second;await tick();const hiddenJob=latest();root.hidden=true;
+  fill(hiddenJob,'HIDDEN');check(input.value === '', 'Hidden modal must not receive results');
+  root.hidden=false;await tick();const replacedJob=latest();const replacement=input.cloneNode();input.replaceWith(replacement);
+  fill(replacedJob,'REPLACED');check(replacement.value === '', 'Replaced input must reject old result');
+  check(clicks === 0, 'Submit must never be clicked');
+  for (const disconnect of disconnects) disconnect();
+  report.textContent='PASS: auto start, value/events, image change, stale result, manual input, hidden modal, replaced input, no submit';
+  document.body.dataset.result='pass';
+} catch(error) {
+  report.textContent=error instanceof Error?error.stack:String(error);document.body.dataset.result='fail';
+}
+</script>

@@ -3,6 +3,9 @@ const openingFormat = new Intl.DateTimeFormat("ko-KR", {
   timeZone: "Asia/Seoul", dateStyle: "long", timeStyle: "short",
 });
 const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+element("capture").onclick = () => chrome.tabs.create({
+  url: chrome.runtime.getURL("capture.html") + "?tab=" + tab.id,
+});
 let pending = false;
 
 async function update(action) {

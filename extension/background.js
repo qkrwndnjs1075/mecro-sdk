@@ -30,7 +30,7 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(event => {
     }
   });
 });
-chrome.tabs.onRemoved.addListener(id => ordered(() => store.remove(String(id))));
+chrome.tabs.onRemoved.addListener(id => ordered(() => store.remove([String(id), "capture:" + id])));
 
 chrome.runtime.onMessage.addListener((request, sender, respond) => {
   if (!sender.tab || sender.frameId !== 0) return;
@@ -38,6 +38,24 @@ chrome.runtime.onMessage.addListener((request, sender, respond) => {
   ordered(async () => {
     const frame = await chrome.webNavigation.getFrame({tabId: sender.tab.id, frameId: 0});
     if (frame?.documentId !== sender.documentId) throw Error("페이지가 변경됐습니다.");
+    if (request.op === "open-capture") {
+      const captureKey = "capture:" + key;
+      const saved = (await store.get(captureKey))[captureKey];
+      const url = chrome.runtime.getURL("capture.html") + "?tab=" + sender.tab.id;
+      if (saved) {
+        const tabs = await chrome.tabs.query({});
+        if (tabs.some(tab => tab.id === saved.id && tab.url === url)) {
+          if (saved.documentId !== sender.documentId) {
+            await chrome.tabs.reload(saved.id);
+            await store.set({[captureKey]: {...saved, documentId: sender.documentId}});
+          }
+          return {opened: true};
+        }
+      }
+      const capture = await chrome.tabs.create({url, active: false});
+      await store.set({[captureKey]: {id: capture.id, documentId: sender.documentId}});
+      return {opened: true};
+    }
     if (request.op === "save") await store.set({[key]: request.state});
     if (request.op === "clear") await store.remove(key);
     return {state: (await store.get(key))[key] ?? null};
