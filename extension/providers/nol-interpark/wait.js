@@ -33,7 +33,7 @@
     if (!response.ok || response.redirected || !Number.isFinite(site) || !Number.isSafeInteger(age)) {
       throw Error(delayError);
     }
-    siteClock = {value: site, at: performance.now()};
+    siteClock = {value: site, at: performance.now(), local: Date.now()};
   }
   async function finish(message) {
     await save({...state, phase: "done", message});
@@ -73,19 +73,29 @@
   function schedule(deadline, token) {
     const tick = async () => {
       if (!current(token)) return;
-      const remaining = deadline - performance.now();
-      if (remaining > 0) {
-        timer = setTimeout(tick, Math.min(remaining, 2147483647));
-        return;
-      }
       try {
+        // Some platforms pause the monotonic clock during system sleep.
+        if (Math.abs((Date.now() - siteClock.local) - (performance.now() - siteClock.at)) > 2000) {
+          await syncClock();
+          if (!current(token)) return;
+          deadline = performance.now() + state.opening - siteNow();
+        }
+        const remaining = deadline - performance.now();
+        if (remaining > 0) {
+          timer = setTimeout(tick, Math.min(remaining, 30000));
+          return;
+        }
         await save({...state, phase: "refreshing", message: gate ? "일반예매 버튼을 기다립니다." : "새로고침 중…"});
         if (current(token)) {
           if (gate) await enterBooking(token);
           else location.reload();
         }
-      } catch {
-        if (current(token)) state = {phase: "done", message: "대기 상태를 저장하지 못했습니다."};
+      } catch (error) {
+        if (current(token) && state.phase === "waiting") {
+          timer = setTimeout(tick, 2000);
+        } else if (current(token)) {
+          await finish(error instanceof Error ? error.message : "대기를 계속할 수 없습니다.");
+        }
       }
     };
     tick();

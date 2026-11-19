@@ -19,6 +19,18 @@ function ordered(task) {
   return result;
 }
 
+function syncWaitPower() {
+  return ordered(async () => {
+    const states = await store.get(null);
+    const waiting = Object.entries(states).some(([key, state]) =>
+      /^\d+$/.test(key) && ["waiting", "refreshing", "booking"].includes(state?.phase));
+    if (waiting) chrome.power.requestKeepAwake("system");
+    else chrome.power.releaseKeepAwake();
+  });
+}
+store.onChanged.addListener(syncWaitPower);
+void syncWaitPower();
+
 chrome.webNavigation.onCommitted.addListener(event => {
   if (event.frameId !== 0) return;
   ordered(async () => {

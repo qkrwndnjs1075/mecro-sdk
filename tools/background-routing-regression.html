@@ -8,7 +8,8 @@ let frameReads = 0;
 const saved = {phase: 'waiting'};
 const event = {addListener() {}};
 globalThis.chrome = {
-  storage: {session: {get: async key => ({[key]: saved})}},
+  storage: {session: {onChanged: event, get: async key => key === null ? {} : ({[key]: saved})}},
+  power: {requestKeepAwake() {}, releaseKeepAwake() {}},
   webNavigation: {
     onCommitted: event, onCreatedNavigationTarget: event,
     getFrame: async () => {frameReads++; return {documentId: 'current'};},

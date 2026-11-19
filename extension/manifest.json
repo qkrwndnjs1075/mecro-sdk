@@ -6,7 +6,7 @@
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
   "description": "NOL 인터파크에서 예정된 일반예매의 오픈 시각을 확인하고 대기합니다.",
-  "permissions": ["activeTab", "storage", "webNavigation", "scripting", "offscreen"],
+  "permissions": ["activeTab", "storage", "webNavigation", "scripting", "offscreen", "power"],
   "host_permissions": ["https://tickets.interpark.com/*", "https://nol.yanolja.com/ticket/*"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [{
