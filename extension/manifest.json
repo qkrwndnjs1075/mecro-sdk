@@ -1,6 +1,12 @@
 {
   "manifest_version": 3,
   "name": "mecro-sdk",
+  "icons": {
+    "16": "icons/ticket-16.png",
+    "32": "icons/ticket-32.png",
+    "48": "icons/ticket-48.png",
+    "128": "icons/ticket-128.png"
+  },
   "version": "0.2.0",
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"

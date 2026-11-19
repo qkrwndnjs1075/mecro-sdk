@@ -1,18 +1,23 @@
 <!doctype html>
-<html lang="ko">
+<html lang="ko" data-type="software">
 <meta charset="utf-8">
-<title>NOL 인터파크 예매</title>
-<style>
-  body { width: 250px; margin: 20px; font: 15px/1.5 system-ui, sans-serif; }
-  h1 { font-size: 16px; margin: 0; }
-  p { margin: 8px 0 0; }
-  button { margin-top: 10px; padding: 6px 12px; cursor: pointer; }
-</style>
-<h1>NOL 인터파크 일반예매</h1>
-<p id="selection" role="status">확인 중…</p>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>일반예매 대기</title>
+<meta name="page-type" content="software">
+<meta name="site-kind" content="software">
+<link rel="stylesheet" href="popup.css">
+<main>
+<header><strong><img src="icons/ticket.svg" width="26" height="26" alt="">mecro<span>/</span>sdk</strong><span id="booking-label">일반예매</span></header>
+<h1 id="selection">공연 확인 중…</h1>
 <p id="round" hidden></p>
-<p id="opening"></p>
-<div><button type="button" id="start" disabled>일반예매 대기 시작</button> <button type="button" id="cancel" hidden>대기 취소</button></div>
+<section id="schedule" aria-label="예매 오픈 일정" hidden>
+  <div class="time-label"><span id="clock-label">서버 시각</span><span>한국시간</span></div>
+  <div id="clock" role="timer">확인 중</div>
+  <div id="opening-row" hidden><span>예매 오픈</span><strong id="opening"></strong></div>
+</section>
 <p id="status" role="status"></p>
+<button type="button" id="start" disabled>일반예매 대기 시작</button>
+<button type="button" id="cancel" hidden>대기 취소</button>
+</main>
 <script type="module" src="popup.js"></script>
 </html>

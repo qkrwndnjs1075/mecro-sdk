@@ -137,7 +137,9 @@
   chrome.runtime.onMessage.addListener((request, sender, respond) => {
     async function handle() {
       await loaded;
-      if (!siteClock && request.action === "inspect") await syncClock();
+      if (request.action === "inspect" && (!siteClock || !active())) {
+        await syncClock().catch(error => { siteClock = null; throw error; });
+      }
       if (state?.phase === "handoff") state = await storage("load");
       if (product !== location.origin + location.pathname) throw Error("공연 페이지를 다시 열어 주세요.");
       if (request.action === "start") {
@@ -174,7 +176,7 @@
       const details = nolUpcoming.inspect(siteNow());
       const saved = active() ? state : null;
       const round = saved?.selection ?? (details.kind === "calendar" ? mecroSelection.read() : null);
-      respond({label: saved?.label ?? details.label, round, opening: saved?.opening ?? details.opening, message: message || details.message, canStart: !active() && !busy && Number.isFinite(siteNow()) && (details.opening > siteNow() || details.countdown === true), active: Boolean(active()) || busy});
+      respond({siteName: "NOL", serverTime: siteNow(), label: saved?.label ?? details.label, round, opening: saved?.opening ?? details.opening, message: message || details.message, canStart: !active() && !busy && Number.isFinite(siteNow()) && (details.opening > siteNow() || details.countdown === true), active: Boolean(active()) || busy});
     });
     return true;
   });
