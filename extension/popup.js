@@ -62,4 +62,7 @@ async function update(action) {
 }
 element("start").onclick = () => update("start");
 element("cancel").onclick = () => update("cancel");
+chrome.storage.session.onChanged.addListener(changes => {
+  if (changes[tab.id]?.newValue?.phase === "done") void update("inspect");
+});
 await update("inspect");

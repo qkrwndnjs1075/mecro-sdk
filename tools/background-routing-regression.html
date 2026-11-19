@@ -11,7 +11,7 @@ globalThis.chrome = {
   storage: {session: {onChanged: event, get: async key => key === null ? {} : ({[key]: saved})}},
   power: {requestKeepAwake() {}, releaseKeepAwake() {}},
   webNavigation: {
-    onCommitted: event, onCreatedNavigationTarget: event,
+    onCommitted: event, onHistoryStateUpdated: event, onCreatedNavigationTarget: event,
     getFrame: async () => {frameReads++; return {documentId: 'current'};},
   },
   tabs: {onRemoved: event},

@@ -1,4 +1,4 @@
-import {matchesBookingTransfer} from "./providers/navigation.js";
+import {matchesBookingTransfer, reachedBookingWindow} from "./providers/navigation.js";
 
 const store = chrome.storage.session;
 let queue = Promise.resolve();
@@ -32,31 +32,50 @@ function syncWaitPower() {
 store.onChanged.addListener(syncWaitPower);
 void syncWaitPower();
 
-chrome.webNavigation.onCommitted.addListener(event => {
+function handleNavigation(event, allowTransfer) {
   if (event.frameId !== 0) return;
   ordered(async () => {
     const key = String(event.tabId);
     const state = (await store.get(key))[key];
     const url = new URL(event.url);
+    const linkKey = "opener:" + key;
+    const link = (await store.get(linkKey))[linkKey];
+    if (link) {
+      const parent = (await store.get(link.source))[link.source];
+      if (parent?.attemptId !== link.attemptId || parent.phase !== "handoff") {
+        await store.remove(linkKey);
+      } else if (matchesBookingTransfer(parent, url) || reachedBookingWindow(parent, url)) {
+        const gateOpened = matchesBookingTransfer(parent, url);
+        const updates = {[link.source]: {...parent, phase: "done", message: gateOpened ? "예매 대기 화면이 열렸습니다." : "예매창이 열렸습니다."}};
+        if (gateOpened) updates[key] = {...parent, product: url.origin + url.pathname, phase: "refreshing"};
+        await store.set(updates);
+        await store.remove(linkKey);
+        return;
+      }
+    }
     if (state && state.product !== url.origin + url.pathname) {
-      if (matchesBookingTransfer(state, url)) {
+      if (reachedBookingWindow(state, url)) {
+        await store.set({[key]: {...state, product: url.origin + url.pathname, phase: "done", message: "예매창이 열렸습니다."}});
+      } else if (allowTransfer && matchesBookingTransfer(state, url)) {
         await store.set({[key]: {...state, product: url.origin + url.pathname, phase: "refreshing"}});
       } else await store.remove(key);
     }
   });
-});
+}
+chrome.webNavigation.onCommitted.addListener(event => handleNavigation(event, true));
+chrome.webNavigation.onHistoryStateUpdated.addListener(event => handleNavigation(event, false));
 chrome.webNavigation.onCreatedNavigationTarget.addListener(event => {
   ordered(async () => {
     const source = String(event.sourceTabId);
     const state = (await store.get(source))[source];
-    const url = new URL(event.url);
-    if (matchesBookingTransfer(state, url)) {
-      await store.set({[String(event.tabId)]: {...state, product: url.origin + url.pathname, phase: "refreshing"}, [source]: {...state, phase: "done"}});
+    const age = Date.now() - state?.attemptedAt;
+    if (event.sourceFrameId === 0 && state?.phase === "handoff" && state.attemptId && age >= 0 && age <= 10000) {
+      await store.set({["opener:" + event.tabId]: {source, attemptId: state.attemptId}});
     }
   });
 });
 chrome.tabs.onRemoved.addListener(id => {
-  ordered(() => store.remove([String(id), "capture:" + id]));
+  ordered(() => store.remove([String(id), "capture:" + id, "opener:" + id]));
   chrome.runtime.sendMessage({target: "offscreen-ocr", op: "release-tab", tabId: id}).catch(error => {
     console.debug("OCR 탭 정리:", error instanceof Error ? error.message : String(error));
   });
@@ -92,7 +111,11 @@ chrome.runtime.onMessage.addListener((request, sender, respond) => {
   ordered(async () => {
     const frame = await chrome.webNavigation.getFrame({tabId: sender.tab.id, frameId: 0});
     if (frame?.documentId !== sender.documentId) throw Error("페이지가 변경됐습니다.");
-    if (request.op === "save") await store.set({[key]: request.state});
+    if (request.op === "save") {
+      const url = new URL(frame.url);
+      if (request.state.product !== url.origin + url.pathname) throw Error("공연 페이지가 변경됐습니다.");
+      await store.set({[key]: request.state});
+    }
     if (request.op === "clear") await store.remove(key);
     return {state: (await store.get(key))[key] ?? null};
   }).then(respond, error => respond({error: error.message}));

@@ -39,7 +39,7 @@ globalThis.startBookingWait = function startBookingWait(provider) {
     }
     return cancellation;
   }
-  const active = () => state && state.phase !== "done";
+  const active = () => state && state.phase !== "done" && state.phase !== "handoff";
   const delayError = "사이트 기준 시각을 확인하지 못했습니다. 다시 시도해 주세요.";
 
   async function syncClock() {
@@ -79,7 +79,7 @@ globalThis.startBookingWait = function startBookingWait(provider) {
           await finish("일반예매 오픈 일정이 변경되어 대기를 종료했습니다.");
           return;
         }
-        await save({...state, phase: gate ? "done" : "handoff", message: gate ? "일반예매 진입을 시도했습니다." : "예매 준비 화면으로 이동합니다."});
+        await save({...state, phase: "handoff", attemptId: crypto.randomUUID(), attemptedAt: Date.now(), message: "예매 화면으로 이동했는지 확인되지 않았습니다. 이 화면에 머물러 있다면 ‘예매하기’를 직접 눌러 주세요."});
         if (!await mayContinue(token)) return;
         if (sameSelection() && provider.findButton() === button) {
           button.click();
@@ -132,7 +132,6 @@ globalThis.startBookingWait = function startBookingWait(provider) {
     await loaded;
     if (!await mayContinue(token)) return;
     if (!active()) return;
-    if (state.phase === "handoff" && !gate) return;
     const waiting = state.phase === "waiting";
     await syncClock();
     if (!await mayContinue(token)) return;

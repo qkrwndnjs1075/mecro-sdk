@@ -51,7 +51,7 @@ try {
   const result = await send("inspect");
   const shouldClick = mode === "normal" || mode === "failed-clear";
   assert(!result.active && clicks === Number(shouldClick), "wait state and clicks disagree");
-  assert(shouldClick ? saved?.phase === "done" : !saved, "incorrect stored state");
+  assert(shouldClick ? saved?.phase === "handoff" && saved.attemptId : !saved, "a click without navigation must remain unconfirmed");
   document.querySelector("#report").textContent = "PASS " + mode + " clicks=" + clicks;
 } catch (error) {
   document.querySelector("#report").textContent = "FAIL " + error.message;
