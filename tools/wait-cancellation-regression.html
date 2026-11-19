@@ -1,0 +1,59 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Booking wait cancellation regression</title>
+<button id="book" type="button">예매하기</button>
+<pre id="report">Running…</pre>
+<script src="../extension/core/wait.js"></script>
+<script type="module">
+const mode = new URLSearchParams(location.search).get("case") ?? "cancel";
+const cases = ["normal", "cancel", "failed-clear", "failed-save"];
+if (!cases.includes(mode)) throw Error("Unknown test case");
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+let receive, saved, settleClear, clicks = 0;
+const button = document.querySelector("#book");
+button.onclick = () => clicks++;
+const clock = Math.floor(Date.now() / 1000) * 1000;
+const opening = clock + 400;
+window.fetch = async () => new Response(null, {headers: {Date: new Date(clock).toUTCString()}});
+window.chrome.runtime = {
+  onMessage: {addListener(listener) { receive = listener; }},
+  async sendMessage({op, state}) {
+    if (op === "save") {
+      if (mode === "failed-save") return {error: "storage write failed"};
+      saved = state;
+    }
+    if (op === "clear") {
+      await new Promise(resolve => { settleClear = resolve; });
+      if (mode === "failed-clear") return {error: "storage clear failed"};
+      saved = null;
+    }
+    return {state: saved};
+  },
+};
+startBookingWait({
+  name: "Fixture", isGate: true, findButton: () => button,
+  inspect: now => ({kind: "gate", opening: opening > now ? opening : null}),
+});
+const send = action => new Promise(resolve => receive({action}, null, resolve));
+const assert = (condition, reason) => { if (!condition) throw Error(reason); };
+try {
+  const start = await send("start");
+  assert(start.active === (mode !== "failed-save"), "incorrect state after start");
+  if (mode === "cancel" || mode === "failed-clear") {
+    const cancel = send("cancel");
+    await sleep(650);
+    assert(clicks === 0, "clicked before clear settled");
+    settleClear();
+    const reply = await cancel;
+    if (mode === "failed-clear") assert(reply.message === "storage clear failed", "lost cancellation error");
+  }
+  await sleep(800);
+  const result = await send("inspect");
+  const shouldClick = mode === "normal" || mode === "failed-clear";
+  assert(!result.active && clicks === Number(shouldClick), "wait state and clicks disagree");
+  assert(shouldClick ? saved?.phase === "done" : !saved, "incorrect stored state");
+  document.querySelector("#report").textContent = "PASS " + mode + " clicks=" + clicks;
+} catch (error) {
+  document.querySelector("#report").textContent = "FAIL " + error.message;
+}
+</script>
