@@ -1,4 +1,6 @@
-export function createImageReader(createWorker, prepare, publish) {
+import {recognizeImage} from "./recognize-image.js";
+
+export function createImageReader(createWorker, publish) {
   let revision = 0;
   let pending;
   let running = false;
@@ -13,12 +15,15 @@ export function createImageReader(createWorker, prepare, publish) {
         try {
           worker ??= await createWorker();
           if (job.revision !== revision) continue;
-          const image = await prepare(job.source);
-          if (job.revision !== revision) continue;
-          const {data} = await worker.recognize(image);
+          const result = await recognizeImage(worker, job.source, () => job.revision === revision);
+          if (!result) continue;
+          const {data, usable} = result;
           if (job.revision === revision) {
-            const text = data.text.replace(/[^A-Za-z0-9]/g, "");
-            publish({text, source: job.source, context: job.context, status: text ? "인식 후보입니다. 원본 이미지와 대조해 주세요." : "읽을 수 있는 문자·숫자가 없습니다."});
+            const text = data.text;
+            const status = !text ? "읽을 수 있는 문자·숫자가 없습니다."
+              : usable ? "인식 후보입니다. 원본 이미지와 대조해 주세요."
+              : "자동 입력을 보류했습니다. 원본 이미지를 확인해 직접 입력해 주세요.";
+            publish({text, usable, source: job.source, context: job.context, status});
           }
         } catch (error) {
           if (job.revision === revision) {

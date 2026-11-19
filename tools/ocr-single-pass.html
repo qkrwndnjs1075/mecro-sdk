@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<title>로컬 OCR 1회 평가</title>
+<h1>로컬 OCR 1회 평가</h1>
+<canvas width="420" height="100"></canvas>
+<p id="result" role="status">인식 중…</p>
+<script type="module">
+import {createOCRWorker} from '../extension/ocr-worker.js';
+import {recognizeImage} from '../extension/recognize-image.js';
+
+const canvas = document.querySelector('canvas');
+const context = canvas.getContext('2d');
+const expected = 'Sample123';
+context.fillStyle = 'white';
+context.fillRect(0, 0, canvas.width, canvas.height);
+context.font = '48px Arial';
+context.fillStyle = 'black';
+context.fillText(expected, 20, 65);
+
+window.chrome.runtime ??= {getURL: path => new URL('../extension/' + path, location.href).href};
+const result = document.querySelector('#result');
+let worker;
+try {
+  worker = await createOCRWorker();
+  const {data} = await recognizeImage(worker, canvas.toDataURL());
+  const text = data.text.trim();
+  result.textContent = `인식 결과 ${text} · ${text === expected.toUpperCase() ? '일치' : '불일치'}`;
+} catch (error) {
+  result.textContent = String(error);
+} finally {
+  if (worker) await worker.terminate();
+}
+</script>
+</html>

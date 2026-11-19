@@ -1,28 +1,12 @@
 import {createImageReader} from "./capture-ocr.js";
-import {prepareImage} from "./prepare-image.js";
+import {createOCRWorker} from "./ocr-worker.js";
 
-const assets = chrome.runtime.getURL("vendor/ocr/");
 let connection;
 let currentGeneration;
-const readImage = createImageReader(async () => {
-  const worker = await Tesseract.createWorker("eng", 1, {
-    workerPath: assets + "worker.min.js", corePath: assets,
-    langPath: assets, workerBlobURL: false,
-  });
-  try {
-    await worker.setParameters({
-      tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
-      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
-    });
-  } catch (error) {
-    await worker.terminate();
-    throw error;
-  }
-  return worker;
-}, prepareImage, ({text, status, source, context}) => {
+const readImage = createImageReader(createOCRWorker, ({text, usable, status, source, context}) => {
   document.querySelector("#result").textContent = text;
   document.querySelector("#ocr-status").textContent = status;
-  if (text && connection) connection.postMessage({op: "fill", text, source, generation: context});
+  if (usable && connection) connection.postMessage({op: "fill", text, source, generation: context});
 });
 
 const status = document.querySelector("#status");
@@ -54,12 +38,15 @@ chrome.runtime.onConnect.addListener(port => {
     }
   });
   port.onDisconnect.addListener(() => {
+    const error = chrome.runtime.lastError;
+    if (connection !== port) return;
     connection = undefined;
     readImage("");
     source.value = "";
     preview.hidden = true;
     preview.removeAttribute("src");
-    status.textContent = "원래 탭과 연결이 종료됐습니다. 원래 탭의 확장 메뉴에서 다시 시작해 주세요.";
+    status.textContent = "미리보기 연결이 종료됐습니다. 자동 입력은 원래 페이지에서 별도로 실행됩니다.";
+    if (error) console.debug("OCR 연결 종료:", error.message);
   });
 });
 

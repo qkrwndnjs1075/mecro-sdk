@@ -1,5 +1,17 @@
 const store = chrome.storage.session;
 let queue = Promise.resolve();
+let creatingOCR;
+async function ensureOCR() {
+  if (!creatingOCR) {
+    creatingOCR = (async () => {
+      const contexts = await chrome.runtime.getContexts({contextTypes: ["OFFSCREEN_DOCUMENT"], documentUrls: [chrome.runtime.getURL("offscreen.html")]});
+      if (!contexts.length) await chrome.offscreen.createDocument({
+        url: "offscreen.html", reasons: ["WORKERS"], justification: "팝업 이미지를 탭 활성화 없이 로컬 OCR 워커로 인식합니다.",
+      });
+    })().finally(() => {creatingOCR = undefined;});
+  }
+  return creatingOCR;
+}
 const id = url => new URL(url).pathname.match(/^\/(?:ticket\/products|goods|gates\/ticket)\/([A-Za-z0-9]+)\/?$/)?.[1];
 function ordered(task) {
   const result = queue.then(task);
@@ -30,32 +42,43 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(event => {
     }
   });
 });
-chrome.tabs.onRemoved.addListener(id => ordered(() => store.remove([String(id), "capture:" + id])));
+chrome.tabs.onRemoved.addListener(id => {
+  ordered(() => store.remove([String(id), "capture:" + id]));
+  chrome.runtime.sendMessage({target: "offscreen-ocr", op: "release-tab", tabId: id}).catch(error => {
+    console.debug("OCR 탭 정리:", error instanceof Error ? error.message : String(error));
+  });
+});
+
+chrome.runtime.onInstalled.addListener(async () => {
+  const entry = chrome.runtime.getManifest().content_scripts.find(script => script.js.includes("auto-capture.js"));
+  const tabs = await chrome.tabs.query({url: entry.matches});
+  const results = await Promise.allSettled(tabs.map(tab => chrome.scripting.executeScript({
+    target: {tabId: tab.id}, files: entry.js,
+  })));
+  for (const result of results) {
+    if (result.status === "rejected") console.error("열린 페이지 OCR 감지 연결 실패:", result.reason);
+  }
+});
 
 chrome.runtime.onMessage.addListener((request, sender, respond) => {
-  if (!sender.tab || sender.frameId !== 0) return;
+  if (request.target === "offscreen-ocr" || !sender.tab || sender.frameId !== 0) return;
+  if (request.op === "recognize-captcha") {
+    (async () => {
+      if (typeof request.source !== "string" || !/^data:image\/[^;,]+;base64,/i.test(request.source)) throw Error("이미지 형식이 올바르지 않습니다.");
+      if (typeof request.observerId !== "string" || !Number.isSafeInteger(request.generation) || request.generation < 1) throw Error("이미지 요청 순서가 올바르지 않습니다.");
+      const frame = await chrome.webNavigation.getFrame({tabId: sender.tab.id, frameId: 0});
+      if (frame?.documentId !== sender.documentId) throw Error("페이지가 변경됐습니다.");
+      await ensureOCR();
+      const current = await chrome.webNavigation.getFrame({tabId: sender.tab.id, frameId: 0});
+      if (current?.documentId !== sender.documentId) throw Error("페이지가 변경됐습니다.");
+      return chrome.runtime.sendMessage({target: "offscreen-ocr", key: sender.documentId + ":" + request.observerId, token: request.generation, tabId: sender.tab.id, documentId: sender.documentId, source: request.source});
+    })().then(respond, error => respond({error: error instanceof Error ? error.message : String(error)}));
+    return true;
+  }
   const key = String(sender.tab.id);
   ordered(async () => {
     const frame = await chrome.webNavigation.getFrame({tabId: sender.tab.id, frameId: 0});
     if (frame?.documentId !== sender.documentId) throw Error("페이지가 변경됐습니다.");
-    if (request.op === "open-capture") {
-      const captureKey = "capture:" + key;
-      const saved = (await store.get(captureKey))[captureKey];
-      const url = chrome.runtime.getURL("capture.html") + "?tab=" + sender.tab.id;
-      if (saved) {
-        const tabs = await chrome.tabs.query({});
-        if (tabs.some(tab => tab.id === saved.id && tab.url === url)) {
-          if (saved.documentId !== sender.documentId) {
-            await chrome.tabs.reload(saved.id);
-            await store.set({[captureKey]: {...saved, documentId: sender.documentId}});
-          }
-          return {opened: true};
-        }
-      }
-      const capture = await chrome.tabs.create({url, active: false});
-      await store.set({[captureKey]: {id: capture.id, documentId: sender.documentId}});
-      return {opened: true};
-    }
     if (request.op === "save") await store.set({[key]: request.state});
     if (request.op === "clear") await store.remove(key);
     return {state: (await store.get(key))[key] ?? null};

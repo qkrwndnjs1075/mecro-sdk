@@ -2,10 +2,14 @@
 <meta charset="utf-8">
 <title>Automatic input regression</title>
 <pre id="report">Running…</pre>
-<div class="ModalCaptchaText_layerWrap_test">
-  <div class="ModalCaptchaText_captchaImage_test"><img width="210" height="70" alt="캡챠 이미지"></div>
-  <input class="ModalCaptchaText_captchaInput_test">
-  <button id="submit" type="button">입력완료</button>
+<div class="ModalLayout_innerWrap_test">
+  <div class="ModalCaptchaText_layerWrap_test">
+    <div class="ModalCaptchaText_captchaImage_test"><img width="210" height="70" alt="캡챠 이미지"></div>
+    <input class="ModalCaptchaText_captchaInput_test">
+    <div class="ModalCaptchaText_captchaError__test" hidden></div>
+    <button id="refresh" type="button" aria-label="새 문자 불러오기"></button>
+  </div>
+  <footer><button id="submit" type="button" class="EntButton_button__test EntButton_primary__test entButtonGlobal">입력완료</button></footer>
 </div>
 <script src="../extension/capture-source.js"></script>
 <script type="module">
@@ -13,14 +17,18 @@ const report = document.querySelector('#report');
 const messages = [];
 const receivers = [];
 const disconnects = [];
-let starts = 0, inputs = 0, changes = 0, clicks = 0;
+let starts = 0, inputs = 0, changes = 0, clicks = 0, refreshes = 0, submissions = 0;
+let automatic = false;
+const autoJobs = [];
 globalThis.chrome = {runtime: {
   connect: () => ({postMessage: message => messages.push(message), onMessage: {addListener: fn => receivers.push(fn)}, onDisconnect: {addListener: fn => disconnects.push(fn)}}),
-  sendMessage: async () => {starts++; return {opened:true};},
+  sendMessage: () => {starts++; return automatic ? new Promise(resolve => autoJobs.push(resolve)) : Promise.resolve({});},
 }};
 const input = document.querySelector('input');
 const img = document.querySelector('img');
 const root = document.querySelector('.ModalCaptchaText_layerWrap_test');
+const error = root.querySelector('[class*="ModalCaptchaText_captchaError"]');
+const submittedValues = [];
 const canvas = document.createElement('canvas');canvas.width = 210;canvas.height = 70;
 const ctx = canvas.getContext('2d');ctx.fillRect(0,0,210,70);
 const first = canvas.toDataURL();ctx.fillStyle='white';ctx.fillRect(0,0,210,70);const second = canvas.toDataURL();
@@ -30,11 +38,27 @@ const latest = () => messages.filter(message => 'source' in message).at(-1);
 const fill = (job, text) => receivers[0]({op:'fill',...job,text});
 input.addEventListener('input', () => inputs++);
 input.addEventListener('change', () => changes++);
-document.querySelector('#submit').addEventListener('click', () => clicks++);
+document.querySelector('#submit').addEventListener('click', () => {
+  clicks++;
+  submittedValues.push(document.querySelector('input').value);
+});
+document.querySelector('#submit').addEventListener('click', () => {
+  if (automatic && submissions++ === 0) {
+    error.textContent = '입력한 문자를 다시 확인해주세요';
+    error.hidden = false;
+  }
+});
+document.querySelector('#refresh').addEventListener('click', () => {
+  refreshes++;
+  error.hidden = true;
+  img.src = first;
+});
 try {
   observePopupImage();observePopupImage('test');
   await tick();check(starts === 0, 'No popup must not start OCR');
   img.src = first;await tick();check(starts === 1, 'Popup must automatically request OCR');
+  window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted:true}));await tick();
+  check(starts === 2, 'Restoring the same document must request reconnection without an image change');
   const firstJob = latest();fill(firstJob,'ABC123');
   check(input.value === 'ABC123' && inputs === 1 && changes === 1, 'Fill must update value and dispatch framework events');
   img.src = second;await tick();check(input.value === '', 'New image clears previous automatic value');
@@ -45,9 +69,17 @@ try {
   fill(hiddenJob,'HIDDEN');check(input.value === '', 'Hidden modal must not receive results');
   root.hidden=false;await tick();const replacedJob=latest();const replacement=input.cloneNode();input.replaceWith(replacement);
   fill(replacedJob,'REPLACED');check(replacement.value === '', 'Replaced input must reject old result');
-  check(clicks === 0, 'Submit must never be clicked');
+  check(clicks === 0, 'Manual preview results must not submit');
   for (const disconnect of disconnects) disconnect();
-  report.textContent='PASS: auto start, value/events, image change, stale result, manual input, hidden modal, replaced input, no submit';
+  const startsBeforeAutomaticRetry = starts;
+  automatic = true;
+  img.src=first;await tick();img.src=second;await tick();
+  autoJobs[0]({text:'STALE'});await tick();check(replacement.value === '', 'Automatic worker stale reply must be rejected');
+  autoJobs[1]({text:'NEW123'});await tick();
+  check(clicks === 1 && refreshes === 1 && starts === startsBeforeAutomaticRetry + 3 && replacement.value === '' && submittedValues[0] === 'NEW123', 'Rejected automatic input must submit, refresh, and request OCR for the replacement image');
+  autoJobs[2]({text:'RETRY9'});await tick();
+  check(replacement.value === 'RETRY9' && clicks === 2 && refreshes === 1 && submittedValues[1] === 'RETRY9', 'Replacement OCR result must be submitted without repeating refresh');
+  report.textContent='PASS: auto start, cached-page reconnect, value/events, image change, stale result, manual input, hidden modal, replaced input, auto submit, wrong-answer refresh and retry';
   document.body.dataset.result='pass';
 } catch(error) {
   report.textContent=error instanceof Error?error.stack:String(error);document.body.dataset.result='fail';

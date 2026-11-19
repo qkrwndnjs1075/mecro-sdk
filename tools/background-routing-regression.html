@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Background message routing regression</title>
+<pre id="report">Running…</pre>
+<script type="module">
+let receive;
+let frameReads = 0;
+const saved = {phase: 'waiting'};
+const event = {addListener() {}};
+globalThis.chrome = {
+  storage: {session: {get: async key => ({[key]: saved})}},
+  webNavigation: {
+    onCommitted: event, onCreatedNavigationTarget: event,
+    getFrame: async () => {frameReads++; return {documentId: 'current'};},
+  },
+  tabs: {onRemoved: event},
+  runtime: {onInstalled: event, onMessage: {addListener: listener => {receive = listener;}}},
+};
+await import('../extension/background.js');
+const report = document.querySelector('#report');
+try {
+  const sender = {tab: {id: 17}, frameId: 0, documentId: 'current'};
+  let answered = false;
+  const handled = receive({target: 'offscreen-ocr', key: 'test', token: 1}, sender, () => {answered = true;});
+  if (handled !== undefined || answered || frameReads !== 0) throw Error('Background intercepted an offscreen-owned message');
+  const reply = await new Promise(resolve => receive({op: 'get'}, sender, resolve));
+  if (reply.state.phase !== 'waiting' || frameReads !== 1) throw Error('Session state requests stopped working');
+  report.textContent = 'PASS: offscreen messages ignored; session state requests handled';
+  document.body.dataset.result = 'pass';
+} catch (error) {
+  report.textContent = error instanceof Error ? error.stack : String(error);
+  document.body.dataset.result = 'fail';
+}
+</script>

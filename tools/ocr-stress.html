@@ -1,0 +1,22 @@
+<!doctype html><meta charset="utf-8"><title>OCR synthetic stress report</title><pre id="report">Running</pre>
+<script type="module">
+import {recognizeImage} from '../extension/recognize-image.js';
+import {createOCRWorker} from '../extension/ocr-worker.js';
+window.chrome={runtime:{getURL:path=>new URL('/extension/'+path,location.href).href}};
+const worker=await createOCRWorker();const rows=[];
+let seed=20261119;const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+try {
+ for(const font of ['Arial','Georgia','monospace']) for(const line of ['none','same','different']) for(const size of [1,2]) {
+  let expected='';for(let i=0;i<6;i++){seed=(Math.imul(seed,1664525)+1013904223)>>>0;expected+=alphabet[seed%alphabet.length];}
+  const canvas=document.createElement('canvas');canvas.width=210*size;canvas.height=70*size;const ctx=canvas.getContext('2d');ctx.scale(size,size);
+  ctx.fillStyle='#1c3153';ctx.fillRect(0,0,210,70);ctx.fillStyle='#57dfca';ctx.font='28px '+font;
+  for(let i=0;i<expected.length;i++)ctx.fillText(expected[i],16+i*30,46);
+  if(line!=='none'){ctx.strokeStyle=line==='same'?'#57dfca':'#f9bb43';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(5,32);ctx.lineTo(205,35);ctx.stroke();}
+  const source=canvas.toDataURL();
+  const {data,usable}=await recognizeImage(worker,source);
+  const actual=data.text.trim();
+  rows.push({font,line,size,expected,actual,automaticText:usable?actual:'',matched:actual===expected});
+ }
+ document.querySelector('#report').textContent=JSON.stringify({matched:rows.filter(row=>row.matched).length,total:rows.length,rows},null,2);document.body.dataset.result='done';
+}finally{await worker.terminate();}
+</script>

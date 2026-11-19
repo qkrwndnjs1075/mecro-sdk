@@ -1,0 +1,1 @@
+{"private":true,"type":"module","scripts":{"build":"bun run build.js"},"dependencies":{"onnxruntime-web":"1.23.2"}}

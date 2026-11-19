@@ -1,0 +1,136 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Offscreen queue regression</title>
+<pre id="report">Running…</pre>
+<script type="module">
+import {createImageReader} from '../extension/capture-ocr.js';
+import {createOCRMessageHandler} from '../extension/ocr-queue.js';
+let calls = 0;
+let active = 0;
+let maxActive = 0;
+let recognitionGate;
+let initializationGate;
+const results = [];
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => {resolve = yes; reject = no;});
+  return {promise, resolve, reject};
+};
+function holdRecognition() {
+  const gate = {entered: deferred(), completed: deferred()};
+  recognitionGate = gate;
+  return gate;
+}
+async function createWorker() {
+  if (initializationGate) {
+    const gate = initializationGate;
+    initializationGate = undefined;
+    gate.entered.resolve();
+    await gate.completed.promise;
+  }
+  return {
+    recognize: async () => {
+      calls++;
+      active++;
+      maxActive = Math.max(maxActive, active);
+      try {
+        if (recognitionGate) {
+          const gate = recognitionGate;
+          recognitionGate = undefined;
+          gate.entered.resolve();
+          await gate.completed.promise;
+        }
+        return {data: {text: 'nEw123', confidence: 0.9}};
+      } finally {active--;}
+    },
+    terminate: async () => {},
+  };
+}
+const receive = createOCRMessageHandler(createWorker);
+const request = token => new Promise(resolve => receive({target:'offscreen-ocr', key:'document:observer', token, tabId:10, documentId:'document', source:'fixtures/new-1.png'}, {}, resolve));
+const releaseTab = () => new Promise(resolve => receive({target:'offscreen-ocr',op:'release-tab',tabId:10},{},resolve));
+try {
+  const newest = request(2);
+  const old = await request(1);
+  const result = await newest;
+  if (!old.stale) throw Error('Late old request displaced the newest image');
+  if (result.text !== 'NEW123') throw Error(`OCR result was not normalized to uppercase: ${result.text}`);
+  const completedCalls = calls;
+  const lateDuplicate = await request(1);
+  if (!lateDuplicate.stale || calls !== completedCalls) throw Error('Completed newer generation was forgotten');
+  await releaseTab();
+  const newDocument = await request(1);
+  if (newDocument.text !== 'NEW123' || calls - completedCalls !== 1) throw Error('Closed tab state was not released');
+  results.push({scenario: 'out-of-order requests, late duplicate, tab cleanup', result: 'pass'});
+
+  for (const scenario of [
+    {name: 'superseded during recognition'},
+    {name: 'released during recognition', release: true, stop: true},
+    {name: 'released and same token reused during recognition', release: true},
+    {name: 'stale OCR rejection', reject: true},
+  ]) {
+    await releaseTab();
+    const before = calls;
+    const gate = holdRecognition();
+    const staleJob = request(1);
+    await gate.entered.promise;
+    if (scenario.release) await releaseTab();
+    const freshJob = scenario.stop ? undefined : request(scenario.release ? 1 : 2);
+    if (scenario.reject) gate.completed.reject(Error('Injected stale OCR failure'));
+    else gate.completed.resolve();
+    const staleResult = await staleJob;
+    const freshResult = await freshJob;
+    const expectedCalls = scenario.stop ? 1 : 2;
+    if (!staleResult.stale || 'text' in staleResult || 'error' in staleResult || calls - before !== expectedCalls || (freshJob && freshResult.text !== 'NEW123')) {
+      throw Error(`${scenario.name}: ${JSON.stringify({staleResult, freshResult, calls: calls - before, expectedCalls})}`);
+    }
+    results.push({scenario: scenario.name, result: 'pass', recognitionCalls: calls - before});
+  }
+
+  // The stale rejection above releases the failed worker before the next queued job.
+  await releaseTab();
+  const failureGate = holdRecognition();
+  const failedJob = request(1);
+  await failureGate.entered.promise;
+  failureGate.completed.reject(Error('Injected current OCR failure'));
+  const failure = await failedJob;
+  if (failure.error !== 'Injected current OCR failure') throw Error('Current worker failures were hidden');
+  const initGate = {entered: deferred(), completed: deferred()};
+  initializationGate = initGate;
+  const staleInitialization = request(2);
+  await initGate.entered.promise;
+  const beforeInitialization = calls;
+  const currentInitialization = request(3);
+  initGate.completed.resolve();
+  const staleInitResult = await staleInitialization;
+  const currentInitResult = await currentInitialization;
+  if (!staleInitResult.stale || currentInitResult.text !== 'NEW123' || calls - beforeInitialization !== 1) throw Error('Superseded worker initialization still performed OCR');
+  results.push({scenario: 'current error recovery and superseded worker initialization', result: 'pass'});
+
+  {
+    const publications = [];
+    const finished = deferred();
+    const reader = createImageReader(createWorker, value => {
+      publications.push(value);
+      if (value.source === 'new') finished.resolve();
+    });
+    const before = calls;
+    const gate = holdRecognition();
+    reader('old', 'old-context');
+    await gate.entered.promise;
+    reader('new', 'new-context');
+    gate.completed.resolve();
+    await finished.promise;
+    if (calls - before !== 2 || publications.some(value => value.source === 'old') || publications.at(-1).context !== 'new-context' || publications.at(-1).text !== 'NEW123') throw Error('Reader published stale or unnormalized OCR');
+    results.push({scenario: 'reader superseded during OCR', result: 'pass', recognitionCalls: calls - before});
+  }
+  if (maxActive !== 1) throw Error(`Concurrent worker recognition: ${maxActive}`);
+  results.push({scenario: 'serial worker recognition', result: 'pass', maxActive});
+  document.querySelector('#report').textContent = JSON.stringify(results, null, 2);
+  document.body.dataset.result = 'pass';
+} catch(error) {
+  document.querySelector('#report').textContent = JSON.stringify({results, error: error instanceof Error ? error.stack : String(error)}, null, 2);
+  document.body.dataset.result = 'fail';
+}
+</script>
