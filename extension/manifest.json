@@ -11,24 +11,25 @@
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
-  "description": "NOL 인터파크에서 예정된 일반예매의 오픈 시각을 확인하고 대기합니다.",
+  "description": "지원하는 예매처에서 일반예매 오픈 시각을 확인하고 대기합니다.",
   "permissions": ["activeTab", "storage", "webNavigation", "scripting", "offscreen", "power"],
   "host_permissions": ["https://tickets.interpark.com/*", "https://nol.yanolja.com/ticket/*"],
-  "background": { "service_worker": "background.js" },
+  "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [{
     "matches": ["https://nol.yanolja.com/ticket/products/*", "https://tickets.interpark.com/goods/*", "https://tickets.interpark.com/gates/ticket/*"],
     "js": [
       "providers/nol-interpark/selection.js",
       "providers/nol-interpark/upcoming.js",
       "providers/nol-interpark/booking.js",
-      "providers/nol-interpark/wait.js"
+      "core/wait.js",
+      "providers/nol-interpark/provider.js"
     ]
   }, {
     "matches": ["https://tickets.interpark.com/*", "https://nol.yanolja.com/ticket/*"],
     "js": ["capture-source.js", "auto-capture.js"]
   }],
   "action": {
-    "default_title": "mecro-sdk · NOL 인터파크",
+    "default_title": "mecro-sdk · 일반예매",
     "default_popup": "popup.html"
   }
 }

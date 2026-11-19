@@ -1,3 +1,5 @@
+import {matchesBookingTransfer} from "./providers/navigation.js";
+
 const store = chrome.storage.session;
 let queue = Promise.resolve();
 let creatingOCR;
@@ -12,7 +14,6 @@ async function ensureOCR() {
   }
   return creatingOCR;
 }
-const id = url => new URL(url).pathname.match(/^\/(?:ticket\/products|goods|gates\/ticket)\/([A-Za-z0-9]+)\/?$/)?.[1];
 function ordered(task) {
   const result = queue.then(task);
   queue = result.catch(() => {});
@@ -38,7 +39,7 @@ chrome.webNavigation.onCommitted.addListener(event => {
     const state = (await store.get(key))[key];
     const url = new URL(event.url);
     if (state && state.product !== url.origin + url.pathname) {
-      if (state.phase === "handoff" && id(state.product) === id(event.url) && url.hostname === "tickets.interpark.com" && url.pathname.startsWith("/gates/ticket/")) {
+      if (matchesBookingTransfer(state, url)) {
         await store.set({[key]: {...state, product: url.origin + url.pathname, phase: "refreshing"}});
       } else await store.remove(key);
     }
@@ -49,7 +50,7 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(event => {
     const source = String(event.sourceTabId);
     const state = (await store.get(source))[source];
     const url = new URL(event.url);
-    if (state?.phase === "handoff" && id(state.product) === id(event.url) && url.hostname === "tickets.interpark.com" && url.pathname.startsWith("/gates/ticket/")) {
+    if (matchesBookingTransfer(state, url)) {
       await store.set({[String(event.tabId)]: {...state, product: url.origin + url.pathname, phase: "refreshing"}, [source]: {...state, phase: "done"}});
     }
   });

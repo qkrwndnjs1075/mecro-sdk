@@ -1,6 +1,6 @@
-(() => {
+globalThis.startBookingWait = function startBookingWait(provider) {
   const product = location.origin + location.pathname;
-  const gate = location.pathname.startsWith("/gates/ticket/");
+  const gate = provider.isGate;
   let state;
   let timer;
   let generation = 0;
@@ -42,7 +42,7 @@
     const {date, time} = state.selection ?? {};
     const sameSelection = () => {
       if (!state.selection) return true;
-      const selected = mecroSelection.read();
+      const selected = provider.selection.read();
       return selected.date === date && selected.time === time;
     };
     await save({...state, phase: "booking", message: "예매하기 버튼이 열리기를 기다립니다."});
@@ -51,16 +51,16 @@
         await finish("선택한 회차가 변경되어 예매를 중단했습니다.");
         return;
       }
-      const button = nolInterparkBooking.findButton();
+      const button = provider.findButton();
       if (button) {
-        const announced = nolUpcoming.inspect(siteNow());
+        const announced = provider.inspect(siteNow());
         if (announced.opening && announced.opening > siteNow()) {
           await finish("일반예매 오픈 일정이 변경되어 대기를 종료했습니다.");
           return;
         }
         await save({...state, phase: gate ? "done" : "handoff", message: gate ? "일반예매 진입을 시도했습니다." : "예매 준비 화면으로 이동합니다."});
         if (!current(token)) return;
-        if (sameSelection() && nolInterparkBooking.findButton() === button) {
+        if (sameSelection() && provider.findButton() === button) {
           button.click();
         } else {
           await finish("회차 또는 예매 버튼이 변경되어 예매를 중단했습니다.");
@@ -116,7 +116,7 @@
     const deadline = performance.now() + state.opening - siteNow();
     if (!current(token)) return;
     if (waiting) schedule(deadline, token);
-    const restored = !state.selection || await mecroSelection.restore(state.selection, () => current(token) && !(waiting && state.phase === "refreshing"));
+    const restored = !state.selection || await provider.selection.restore(state.selection, () => current(token) && !(waiting && state.phase === "refreshing"));
     if (!current(token) || (waiting && state.phase === "refreshing")) return;
     if (!restored || !waiting) {
       clearTimeout(timer);
@@ -151,10 +151,10 @@
             const token = ++generation;
             await syncClock();
             if (!current(token)) return;
-            const details = nolUpcoming.inspect(siteNow());
+            const details = provider.inspect(siteNow());
             const opening = details.opening;
             if (!opening) throw Error(details.message || "일반예매 오픈 일정을 확인하지 못했습니다.");
-            const selection = details.kind === "calendar" ? mecroSelection.read() : null;
+            const selection = details.kind === "calendar" ? provider.selection.read() : null;
             if (selection && !selection.date) throw Error(selection.message);
             const deadline = performance.now() + opening - siteNow();
             if (!Number.isFinite(deadline) || (deadline <= performance.now() && !details.countdown)) {
@@ -173,11 +173,11 @@
       }
     }
     handle().then(() => state?.message ?? "", error => error.message).then(message => {
-      const details = nolUpcoming.inspect(siteNow());
+      const details = provider.inspect(siteNow());
       const saved = active() ? state : null;
-      const round = saved?.selection ?? (details.kind === "calendar" ? mecroSelection.read() : null);
-      respond({siteName: "NOL", serverTime: siteNow(), label: saved?.label ?? details.label, round, opening: saved?.opening ?? details.opening, message: message || details.message, canStart: !active() && !busy && Number.isFinite(siteNow()) && (details.opening > siteNow() || details.countdown === true), active: Boolean(active()) || busy});
+      const round = saved?.selection ?? (details.kind === "calendar" ? provider.selection.read() : null);
+      respond({siteName: provider.name, serverTime: siteNow(), label: saved?.label ?? details.label, round, opening: saved?.opening ?? details.opening, message: message || details.message, canStart: !active() && !busy && Number.isFinite(siteNow()) && (details.opening > siteNow() || details.countdown === true), active: Boolean(active()) || busy});
     });
     return true;
   });
-})();
+};
