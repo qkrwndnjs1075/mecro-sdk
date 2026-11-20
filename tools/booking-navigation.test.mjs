@@ -4,7 +4,7 @@ import {test} from "node:test";
 test("a booking attempt is confirmed by committed navigation in its own child tab", async () => {
   const handlers = {};
   const event = key => ({addListener(fn) { handlers[key] = fn; }});
-  const source = {phase: "handoff", product: "https://nol.yanolja.com/ticket/products/123", attemptId: "first", attemptedAt: Date.now()};
+  const source = {phase: "handoff", product: "https://nol.yanolja.com/ticket/products/123", attemptId: "first", attemptedAt: Date.now() - 60000};
   const states = {1: source, 2: {...source, attemptId: "second"}};
   globalThis.chrome = {
     storage: {session: {
@@ -24,6 +24,11 @@ test("a booking attempt is confirmed by committed navigation in its own child ta
   }
   const gate = "https://tickets.interpark.com/gates/ticket/123";
   const seat = "https://tickets.interpark.com/onestop/seat";
+  const queue = "https://tickets.interpark.com/waiting?key=fixture";
+  await emit("target", {sourceTabId: 1, sourceFrameId: 0, tabId: 6, url: "about:blank"});
+  await emit("commit", {tabId: 6, frameId: 0, url: "https://example.test/unrelated"});
+  await emit("commit", {tabId: 6, frameId: 0, url: seat});
+  assert.equal(states[1].phase, "handoff");
   await emit("target", {sourceTabId: 1, sourceFrameId: 0, tabId: 3, url: "about:blank"});
   await emit("commit", {tabId: 3, frameId: 0, url: "about:blank"});
   assert.equal(states[1].phase, "handoff");
@@ -31,10 +36,22 @@ test("a booking attempt is confirmed by committed navigation in its own child ta
   assert.equal(states[1].phase, "done");
   assert.equal(states[3].phase, "refreshing");
   assert.equal(states[3].product, gate);
-  states[3] = {...states[3], phase: "handoff", attemptId: "third", attemptedAt: Date.now()};
+  states[3] = {...states[3], phase: "handoff", attemptId: "third"};
   await emit("target", {sourceTabId: 3, sourceFrameId: 0, tabId: 4, url: seat});
   assert.equal(states[3].phase, "handoff");
+  await emit("commit", {tabId: 4, frameId: 0, url: queue});
+  assert.equal(states[3].entryStage, "queue");
+  assert.equal(states[4].product, new URL(queue).origin + "/waiting");
   await emit("commit", {tabId: 4, frameId: 0, url: seat});
   assert.equal(states[3].phase, "done");
+  assert.equal(states[3].entryStage, "seat");
   assert.equal(states[2].phase, "handoff");
+  await emit("commit", {tabId: 2, frameId: 0, url: queue});
+  assert.equal(states[2].entryStage, "queue");
+  await emit("history", {tabId: 2, frameId: 0, url: seat});
+  assert.equal(states[2].entryStage, "seat");
+  states[5] = {...source, phase: "refreshing", product: gate};
+  await emit("commit", {tabId: 5, frameId: 0, url: "https://tickets.interpark.com/onestop/schedule"});
+  assert.equal(states[5].phase, "done");
+  assert.equal(states[5].entryStage, "schedule");
 });

@@ -1,8 +1,13 @@
-export function matchesBookingWindow(source, target) {
+export function bookingStage(source, target) {
   const from = new URL(source);
-  return target.origin === "https://tickets.interpark.com" && target.pathname === "/onestop/seat" &&
-    ((from.origin === target.origin && /^\/(?:goods|gates\/ticket)\/[A-Za-z0-9]+\/?$/.test(from.pathname)) ||
-     (from.origin === "https://nol.yanolja.com" && /^\/ticket\/products\/[A-Za-z0-9]+\/?$/.test(from.pathname)));
+  if (target.origin !== "https://tickets.interpark.com") return null;
+  const supported = (from.origin === target.origin && (from.pathname === "/waiting" || /^\/(?:goods|gates\/ticket)\/[A-Za-z0-9]+\/?$/.test(from.pathname))) ||
+    (from.origin === "https://nol.yanolja.com" && /^\/ticket\/products\/[A-Za-z0-9]+\/?$/.test(from.pathname));
+  if (!supported) return null;
+  if (target.pathname === "/waiting") return "queue";
+  if (target.pathname === "/onestop/schedule") return "schedule";
+  if (target.pathname === "/onestop/seat") return "seat";
+  return null;
 }
 
 export function matchesGateTransfer(source, target) {

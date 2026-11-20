@@ -1,4 +1,4 @@
-import {matchesBookingTransfer, reachedBookingWindow} from "./providers/navigation.js";
+import {matchesBookingTransfer, observedEntry} from "./providers/navigation.js";
 
 const store = chrome.storage.session;
 let queue = Promise.resolve();
@@ -42,20 +42,25 @@ function handleNavigation(event, allowTransfer) {
     const link = (await store.get(linkKey))[linkKey];
     if (link) {
       const parent = (await store.get(link.source))[link.source];
-      if (parent?.attemptId !== link.attemptId || parent.phase !== "handoff") {
+      const entry = observedEntry(parent, url);
+      if (parent?.attemptId !== link.attemptId || (parent.phase !== "handoff" && parent.entryStage !== "queue")) {
         await store.remove(linkKey);
-      } else if (matchesBookingTransfer(parent, url) || reachedBookingWindow(parent, url)) {
-        const gateOpened = matchesBookingTransfer(parent, url);
-        const updates = {[link.source]: {...parent, phase: "done", message: gateOpened ? "예매 대기 화면이 열렸습니다." : "예매창이 열렸습니다."}};
-        if (gateOpened) updates[key] = {...parent, product: url.origin + url.pathname, phase: "refreshing"};
-        await store.set(updates);
+      } else if (entry) {
+        await store.set({[link.source]: entry, [key]: {...entry, product: url.origin + url.pathname}});
+        if (entry.entryStage !== "queue") await store.remove(linkKey);
+        return;
+      } else if (matchesBookingTransfer(parent, url)) {
+        await store.set({[link.source]: {...parent, phase: "done", message: "예매 대기 화면이 열렸습니다."}, [key]: {...parent, product: url.origin + url.pathname, phase: "refreshing"}});
         await store.remove(linkKey);
         return;
+      } else if (parent.entryStage === "queue" || url.href !== "about:blank") {
+        await store.remove(linkKey);
       }
     }
     if (state && state.product !== url.origin + url.pathname) {
-      if (reachedBookingWindow(state, url)) {
-        await store.set({[key]: {...state, product: url.origin + url.pathname, phase: "done", message: "예매창이 열렸습니다."}});
+      const entry = observedEntry(state, url);
+      if (entry) {
+        await store.set({[key]: {...entry, product: url.origin + url.pathname}});
       } else if (allowTransfer && matchesBookingTransfer(state, url)) {
         await store.set({[key]: {...state, product: url.origin + url.pathname, phase: "refreshing"}});
       } else await store.remove(key);
@@ -68,8 +73,7 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(event => {
   ordered(async () => {
     const source = String(event.sourceTabId);
     const state = (await store.get(source))[source];
-    const age = Date.now() - state?.attemptedAt;
-    if (event.sourceFrameId === 0 && state?.phase === "handoff" && state.attemptId && age >= 0 && age <= 10000) {
+    if (event.sourceFrameId === 0 && state?.phase === "handoff" && state.attemptId) {
       await store.set({["opener:" + event.tabId]: {source, attemptId: state.attemptId}});
     }
   });

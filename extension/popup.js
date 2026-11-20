@@ -55,6 +55,15 @@ async function update(action) {
     element("round").hidden = true;
     element("cancel").hidden = true;
     element("status").textContent = "확장을 업데이트했다면 페이지를 새로고침해 주세요.";
+    const entry = (await chrome.storage.session.get(String(tab.id)))[tab.id];
+    if (action === "inspect" && entry?.entryStage && tab.url) {
+      const url = new URL(tab.url);
+      if (entry.product === url.origin + url.pathname) {
+        element("selection").textContent = entry.label;
+        element("status").textContent = entry.message;
+        element("start").hidden = true;
+      }
+    }
   } finally {
     pending = false;
     element("cancel").disabled = false;
@@ -63,6 +72,7 @@ async function update(action) {
 element("start").onclick = () => update("start");
 element("cancel").onclick = () => update("cancel");
 chrome.storage.session.onChanged.addListener(changes => {
-  if (changes[tab.id]?.newValue?.phase === "done") void update("inspect");
+  const phase = changes[tab.id]?.newValue?.phase;
+  if (phase === "handoff" || phase === "done") void update("inspect");
 });
 await update("inspect");
