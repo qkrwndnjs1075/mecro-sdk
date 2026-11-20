@@ -20,6 +20,22 @@ function ordered(task) {
   return result;
 }
 
+const clickOrigins = new Set(["https://nol.yanolja.com", "https://tickets.interpark.com"]);
+async function trustedClick(tabId, documentId, x, y) {
+  const target = {tabId};
+  await chrome.debugger.attach(target, "1.3");
+  try {
+    const frame = await chrome.webNavigation.getFrame({tabId, frameId: 0});
+    if (frame?.documentId !== documentId) throw Error("페이지가 변경됐습니다.");
+    const point = {x, y};
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {...point, type: "mouseMoved"});
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {...point, type: "mousePressed", button: "left", buttons: 1, clickCount: 1});
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {...point, type: "mouseReleased", button: "left", buttons: 0, clickCount: 1});
+  } finally {
+    await chrome.debugger.detach(target).catch(() => {});
+  }
+}
+
 function syncWaitPower() {
   return ordered(async () => {
     const states = await store.get(null);
@@ -115,6 +131,12 @@ chrome.runtime.onMessage.addListener((request, sender, respond) => {
   ordered(async () => {
     const frame = await chrome.webNavigation.getFrame({tabId: sender.tab.id, frameId: 0});
     if (frame?.documentId !== sender.documentId) throw Error("페이지가 변경됐습니다.");
+    if (request.op === "click") {
+      if (!Number.isFinite(request.x) || !Number.isFinite(request.y)) throw Error("클릭 좌표를 확인할 수 없습니다.");
+      if (!clickOrigins.has(new URL(frame.url).origin)) throw Error("지원하지 않는 페이지입니다.");
+      await trustedClick(sender.tab.id, sender.documentId, request.x, request.y);
+      return {clicked: true};
+    }
     if (request.op === "save") {
       const url = new URL(frame.url);
       if (request.state.product !== url.origin + url.pathname) throw Error("공연 페이지가 변경됐습니다.");

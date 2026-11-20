@@ -7,12 +7,12 @@
     "48": "icons/ticket-48.png",
     "128": "icons/ticket-128.png"
   },
-  "version": "0.2.0",
+  "version": "0.3.0",
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
   "description": "지원하는 예매처에서 일반예매 오픈 시각을 확인하고 대기합니다.",
-  "permissions": ["activeTab", "storage", "webNavigation", "scripting", "offscreen", "power"],
+  "permissions": ["activeTab", "debugger", "storage", "webNavigation", "scripting", "offscreen", "power"],
   "host_permissions": ["https://tickets.interpark.com/*", "https://nol.yanolja.com/ticket/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [{
@@ -21,6 +21,7 @@
       "providers/nol-interpark/selection.js",
       "providers/nol-interpark/upcoming.js",
       "providers/nol-interpark/booking.js",
+      "core/click.js",
       "core/wait.js",
       "providers/nol-interpark/provider.js"
     ]

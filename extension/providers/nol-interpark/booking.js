@@ -13,5 +13,11 @@
       ? null : button;
   }
 
-  globalThis.nolInterparkBooking = { findButton };
+  function isLoading() {
+    return [...document.querySelectorAll("main h1")].some(heading =>
+      heading.getClientRects().length > 0 && getComputedStyle(heading).visibility === "visible"
+      && heading.textContent.replace(/\s+/g, "") === "예매에필요한정보를확인하고있어요");
+  }
+
+  globalThis.nolInterparkBooking = { findButton, isLoading };
 })();

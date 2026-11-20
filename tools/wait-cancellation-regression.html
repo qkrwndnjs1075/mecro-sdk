@@ -3,23 +3,32 @@
 <title>Booking wait cancellation regression</title>
 <button id="book" type="button">예매하기</button>
 <pre id="report">Running…</pre>
+<script src="../extension/core/click.js"></script>
 <script src="../extension/core/wait.js"></script>
 <script type="module">
 const mode = new URLSearchParams(location.search).get("case") ?? "cancel";
 const cases = ["normal", "cancel", "failed-clear", "failed-save"];
 if (!cases.includes(mode)) throw Error("Unknown test case");
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-let receive, saved, settleClear, clicks = 0;
+let receive, saved, settleClear, clicks = 0, trustedRequests = 0;
 const button = document.querySelector("#book");
-button.onclick = () => clicks++;
+let trackedClick;
+button.addEventListener("click", () => {
+  clicks++;
+  trackedClick = saved?.attemptId;
+});
 const clock = Math.floor(Date.now() / 1000) * 1000;
 const opening = clock + 400;
 window.fetch = async () => new Response(null, {headers: {Date: new Date(clock).toUTCString()}});
 window.chrome.runtime = {
   onMessage: {addListener(listener) { receive = listener; }},
   async sendMessage({op, state}) {
+    if (op === "click") {
+      trustedRequests++;
+      return {error: "fixture debugger unavailable"};
+    }
     if (op === "save") {
-      if (mode === "failed-save") return {error: "storage write failed"};
+      if (mode === "failed-save" && state.phase === "handoff") return {error: "storage write failed"};
       saved = state;
     }
     if (op === "clear") {
@@ -38,7 +47,7 @@ const send = action => new Promise(resolve => receive({action}, null, resolve));
 const assert = (condition, reason) => { if (!condition) throw Error(reason); };
 try {
   const start = await send("start");
-  assert(start.active === (mode !== "failed-save"), "incorrect state after start");
+  assert(start.active, "incorrect state after start");
   if (mode === "cancel" || mode === "failed-clear") {
     const cancel = send("cancel");
     await sleep(650);
@@ -49,9 +58,12 @@ try {
   }
   await sleep(800);
   const result = await send("inspect");
-  const shouldClick = mode === "normal" || mode === "failed-clear";
-  assert(!result.active && clicks === Number(shouldClick), "wait state and clicks disagree");
-  assert(shouldClick ? saved?.phase === "handoff" && saved.attemptId : !saved, "a click without navigation must remain unconfirmed");
+  const shouldHandoff = ["normal", "failed-clear"].includes(mode);
+  assert(!result.active && clicks === Number(shouldHandoff), "unexpected booking click count");
+  assert(trustedRequests === Number(shouldHandoff), "unexpected trusted click request count");
+  if (shouldHandoff) assert(saved?.phase === "handoff" && saved.attemptId && trackedClick === saved.attemptId, "click must be tracked before it fires");
+  if (mode === "cancel") assert(!saved, "cancelled wait was restored");
+  if (mode === "failed-save") assert(saved?.phase === "done", "failed tracking write did not stop the wait");
   document.querySelector("#report").textContent = "PASS " + mode + " clicks=" + clicks;
 } catch (error) {
   document.querySelector("#report").textContent = "FAIL " + error.message;

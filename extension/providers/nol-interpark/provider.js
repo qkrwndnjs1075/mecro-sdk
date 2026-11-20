@@ -4,4 +4,5 @@ globalThis.startBookingWait({
   inspect: globalThis.nolUpcoming.inspect,
   selection: globalThis.mecroSelection,
   findButton: globalThis.nolInterparkBooking.findButton,
+  isLoading: globalThis.nolInterparkBooking.isLoading,
 });
