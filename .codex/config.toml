@@ -1,6 +1,2 @@
-model = "gpt-6-astra"
-model_context_window = 600000
-model_reasoning_effort = "high"
-plan_mode_reasoning_effort = "xhigh"
 [mcp_servers.rea]
 enabled = true
