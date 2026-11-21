@@ -104,6 +104,67 @@ test("a navigation after attach stops the click and detaches", async () => {
   }
 });
 
+test("a prepared click reuses the attachment and skips a second attach", async () => {
+  calls.length = 0;
+  frame = {documentId: "doc-13", url: "https://tickets.interpark.com/gates/ticket/1"};
+  assert.deepEqual(await send({op: "prepare"}, 13), {prepared: true});
+  assert.deepEqual(await send({op: "click", x: 3, y: 4}, 13), {clicked: true});
+  assert.deepEqual(calls.map(([name]) => name), ["attach", "sendCommand", "sendCommand", "sendCommand", "detach"]);
+  assert.deepEqual(calls[1][3], {x: 3, y: 4, type: "mouseMoved"});
+});
+
+test("a prepare on an unsupported origin is rejected", async () => {
+  calls.length = 0;
+  frame = {documentId: "doc-14", url: "https://example.test/gates/ticket/1"};
+  const reply = await send({op: "prepare"}, 14);
+  assert.match(reply.error, /지원하지 않는 페이지/);
+  assert.equal(calls.length, 0);
+});
+
+test("a click from a replaced document releases the prepared attachment", async () => {
+  calls.length = 0;
+  frame = {documentId: "doc-15", url: "https://tickets.interpark.com/gates/ticket/1"};
+  assert.deepEqual(await send({op: "prepare"}, 15), {prepared: true});
+  frame = {documentId: "moved", url: frame.url};
+  const reply = await send({op: "click", x: 1, y: 2}, 15);
+  assert.match(reply.error, /페이지가 변경됐습니다/);
+  assert.deepEqual(calls.map(([name]) => name), ["attach", "detach"]);
+});
+
+test("a release request detaches a prepared attachment", async () => {
+  calls.length = 0;
+  frame = {documentId: "doc-16", url: "https://tickets.interpark.com/gates/ticket/1"};
+  assert.deepEqual(await send({op: "prepare"}, 16), {prepared: true});
+  assert.deepEqual(await send({op: "release"}, 16), {released: true});
+  assert.deepEqual(calls.map(([name]) => name), ["attach", "detach"]);
+});
+
+test("a prepare reports a debugger attach failure without detaching", async () => {
+  calls.length = 0;
+  frame = {documentId: "doc-17", url: "https://tickets.interpark.com/gates/ticket/1"};
+  const attach = chrome.debugger.attach;
+  chrome.debugger.attach = async () => { throw Error("Another debugger is already attached"); };
+  try {
+    const reply = await send({op: "prepare"}, 17);
+    assert.match(reply.error, /Another debugger is already attached/);
+    assert.equal(calls.some(([name]) => name === "sendCommand" || name === "detach"), false);
+  } finally {
+    chrome.debugger.attach = attach;
+  }
+});
+
+test("the content helper requests and releases a prepared attachment", async () => {
+  const messages = [];
+  const context = vm.createContext({
+    chrome: {runtime: {sendMessage: async message => { messages.push(message); return {prepared: true}; }}},
+    console, document: {},
+  });
+  vm.runInContext(click, context);
+  assert.equal(await context.mecroPrepareClick(), true);
+  context.mecroReleaseClick();
+  assert.deepEqual(messages.map(message => ({...message})), [{op: "prepare"}, {op: "release"}]);
+});
+
 test("the content helper requests one trusted click at the element center", async () => {
   const messages = [];
   let clicked = 0, scrolled = 0;

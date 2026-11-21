@@ -12,6 +12,7 @@ if (!cases.includes(mode)) throw Error("Unknown test case");
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let receive, saved, settleClear, clicks = 0, trustedRequests = 0;
 const button = document.querySelector("#book");
+const readyAt = performance.now() + 400;
 let trackedClick;
 button.addEventListener("click", () => {
   clicks++;
@@ -40,7 +41,8 @@ window.chrome.runtime = {
   },
 };
 startBookingWait({
-  name: "Fixture", isGate: true, findButton: () => button,
+  name: "Fixture", isGate: true,
+  findButton: () => performance.now() >= readyAt ? button : null,
   inspect: now => ({kind: "gate", opening: opening > now ? opening : null}),
 });
 const send = action => new Promise(resolve => receive({action}, null, resolve));

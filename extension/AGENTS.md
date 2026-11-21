@@ -25,6 +25,7 @@ The separate capture group loads `capture-source.js` before `auto-capture.js`. T
 - On reload, resume only a matching state version and product (origin plus pathname). A gate drops the previous page's selection.
 - Save `handoff` with an `attemptId` before clicking. The click records an attempt. Only a recognized top-frame navigation sets `entryStage` to `queue`, `schedule` or `seat`.
 - A handoff click goes through `chrome.debugger` and `Input.dispatchMouseEvent` so the site sees `isTrusted: true`. The content script sends the button's viewport center; the service worker re-checks the sender document and supported origin, attaches, re-checks the document, dispatches mouseMoved, mousePressed and mouseReleased, then detaches. Fall back to `element.click()` only when the debugger path fails.
+- A gate handoff prepares the debugger attachment at `enterBooking` and starts checking for the button 3 seconds before the deadline. The service worker reuses that attachment for the click, expires it after 6 seconds, and releases it on cancel, `pagehide` and navigation. Prepared sessions are bound to the sender's `documentId`; a click from a different document detaches the stale session.
 - Coordinates are viewport CSS pixels from `getBoundingClientRect()`. Scroll the button into view before measuring. Do not substitute `offsetLeft`/`offsetTop`.
 - `providers/nol-interpark/navigation.js` recognizes destination URLs and same-product gate transfers. `providers/navigation.js` applies these rules to the pending state. Child tabs must match the opener's attempt.
 
@@ -32,4 +33,4 @@ The separate capture group loads `capture-source.js` before `auto-capture.js`. T
 
 - [Wait cancellation fixture](../tools/wait-cancellation-regression.html) checks click counts while a clear is pending, after it settles and when saving the handoff fails. It also checks that the trusted click helper is called and falls back when the debugger is unavailable.
 - [Booking navigation test](../tools/booking-navigation.test.mjs) checks a gate handoff, unrelated child tabs and queue-to-seat transitions using simulated Chrome events.
-- [Trusted click test](../tools/trusted-click.test.mjs) checks CDP command order, sender document and origin rejection, attach failure handling, and the content helper's coordinate and fallback behavior.
+- [Trusted click test](../tools/trusted-click.test.mjs) checks CDP command order, sender document and origin rejection, attach failure handling, prepared attachment reuse and release, and the content helper's coordinate, prepare and fallback behavior.

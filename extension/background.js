@@ -21,12 +21,43 @@ function ordered(task) {
 }
 
 const clickOrigins = new Set(["https://nol.yanolja.com", "https://tickets.interpark.com"]);
+// 오픈 직전에 미리 붙여 두면 클릭 순간의 attach 지연을 없앨 수 있다.
+const preparedClicks = new Map();
+const preparedTTL = 6000;
+
+async function releaseClick(tabId) {
+  const session = preparedClicks.get(tabId);
+  if (!session) return;
+  preparedClicks.delete(tabId);
+  clearTimeout(session.timer);
+  await chrome.debugger.detach({tabId}).catch(() => {});
+}
+
+async function prepareClick(tabId, documentId) {
+  await releaseClick(tabId);
+  await chrome.debugger.attach({tabId}, "1.3");
+  const session = {documentId, timer: setTimeout(() => void releaseClick(tabId), preparedTTL)};
+  session.timer?.unref?.();
+  preparedClicks.set(tabId, session);
+}
+
 async function trustedClick(tabId, documentId, x, y) {
   const target = {tabId};
-  await chrome.debugger.attach(target, "1.3");
+  const stale = preparedClicks.get(tabId);
+  if (stale && stale.documentId !== documentId) await releaseClick(tabId);
+  const prepared = preparedClicks.get(tabId);
+  if (prepared) {
+    preparedClicks.delete(tabId);
+    clearTimeout(prepared.timer);
+  } else {
+    await chrome.debugger.attach(target, "1.3");
+  }
   try {
-    const frame = await chrome.webNavigation.getFrame({tabId, frameId: 0});
-    if (frame?.documentId !== documentId) throw Error("페이지가 변경됐습니다.");
+    // 준비된 세션은 만들 때 확인했고, 메시지 처리기가 발신 문서를 다시 확인한다.
+    if (!prepared) {
+      const frame = await chrome.webNavigation.getFrame({tabId, frameId: 0});
+      if (frame?.documentId !== documentId) throw Error("페이지가 변경됐습니다.");
+    }
     const point = {x, y};
     await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {...point, type: "mouseMoved"});
     await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {...point, type: "mousePressed", button: "left", buttons: 1, clickCount: 1});
@@ -51,6 +82,7 @@ void syncWaitPower();
 function handleNavigation(event, allowTransfer) {
   if (event.frameId !== 0) return;
   ordered(async () => {
+    await releaseClick(event.tabId);
     const key = String(event.tabId);
     const state = (await store.get(key))[key];
     const url = new URL(event.url);
@@ -95,7 +127,10 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(event => {
   });
 });
 chrome.tabs.onRemoved.addListener(id => {
-  ordered(() => store.remove([String(id), "capture:" + id, "opener:" + id]));
+  ordered(async () => {
+    await releaseClick(id);
+    await store.remove([String(id), "capture:" + id, "opener:" + id]);
+  });
   chrome.runtime.sendMessage({target: "offscreen-ocr", op: "release-tab", tabId: id}).catch(error => {
     console.debug("OCR 탭 정리:", error instanceof Error ? error.message : String(error));
   });
@@ -130,13 +165,29 @@ chrome.runtime.onMessage.addListener((request, sender, respond) => {
   const key = String(sender.tab.id);
   ordered(async () => {
     const frame = await chrome.webNavigation.getFrame({tabId: sender.tab.id, frameId: 0});
-    if (frame?.documentId !== sender.documentId) throw Error("페이지가 변경됐습니다.");
     if (request.op === "click") {
-      if (!Number.isFinite(request.x) || !Number.isFinite(request.y)) throw Error("클릭 좌표를 확인할 수 없습니다.");
-      if (!clickOrigins.has(new URL(frame.url).origin)) throw Error("지원하지 않는 페이지입니다.");
-      await trustedClick(sender.tab.id, sender.documentId, request.x, request.y);
-      return {clicked: true};
+      try {
+        if (frame?.documentId !== sender.documentId) throw Error("페이지가 변경됐습니다.");
+        if (!Number.isFinite(request.x) || !Number.isFinite(request.y)) throw Error("클릭 좌표를 확인할 수 없습니다.");
+        if (!clickOrigins.has(new URL(frame.url).origin)) throw Error("지원하지 않는 페이지입니다.");
+        await trustedClick(sender.tab.id, sender.documentId, request.x, request.y);
+        return {clicked: true};
+      } catch (error) {
+        await releaseClick(sender.tab.id);
+        throw error;
+      }
     }
+    if (request.op === "prepare") {
+      if (frame?.documentId !== sender.documentId) throw Error("페이지가 변경됐습니다.");
+      if (!clickOrigins.has(new URL(frame.url).origin)) throw Error("지원하지 않는 페이지입니다.");
+      await prepareClick(sender.tab.id, sender.documentId);
+      return {prepared: true};
+    }
+    if (request.op === "release") {
+      await releaseClick(sender.tab.id);
+      return {released: true};
+    }
+    if (frame?.documentId !== sender.documentId) throw Error("페이지가 변경됐습니다.");
     if (request.op === "save") {
       const url = new URL(frame.url);
       if (request.state.product !== url.origin + url.pathname) throw Error("공연 페이지가 변경됐습니다.");

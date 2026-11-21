@@ -1,3 +1,15 @@
+globalThis.mecroPrepareClick = async function mecroPrepareClick() {
+  try {
+    return Boolean((await chrome.runtime.sendMessage({op: "prepare"}))?.prepared);
+  } catch {
+    return false;
+  }
+};
+
+globalThis.mecroReleaseClick = function mecroReleaseClick() {
+  chrome.runtime.sendMessage({op: "release"}).catch(() => {});
+};
+
 globalThis.mecroTrustedClick = async function mecroTrustedClick(element) {
   if (!element || typeof element.click !== "function") return false;
   element.scrollIntoView?.({block: "center", inline: "center", behavior: "instant"});

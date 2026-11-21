@@ -31,6 +31,7 @@ globalThis.startBookingWait = function startBookingWait(provider) {
   }
   function cancel() {
     if (!cancellation) {
+      globalThis.mecroReleaseClick?.();
       cancellation = storage("clear").then(() => {
         generation++;
         clearTimeout(timer);
@@ -66,6 +67,9 @@ globalThis.startBookingWait = function startBookingWait(provider) {
     await save({...state, phase: "done", message});
   }
   async function enterBooking(token) {
+    const started = performance.now();
+    // 오픈 직전에 디버거를 미리 붙여 두고, 클릭 순간에는 입력만 보낸다.
+    if (gate) void globalThis.mecroPrepareClick?.();
     const {date, time} = state.selection ?? {};
     const sameSelection = () => {
       if (!state.selection) return true;
@@ -73,37 +77,44 @@ globalThis.startBookingWait = function startBookingWait(provider) {
       return selected.date === date && selected.time === time;
     };
     await save({...state, phase: "booking", message: "예매하기 버튼이 열리기를 기다립니다."});
-    let buttonDeadline = performance.now() + 30000;
-    while (await mayContinue(token)) {
-      if (!sameSelection()) {
-        await finish("선택한 회차가 변경되어 예매를 중단했습니다.");
-        return;
-      }
-      if (provider.findButton()) {
-        const announced = provider.inspect(siteNow());
-        if (announced.opening && announced.opening > siteNow()) {
-          await finish("일반예매 오픈 일정이 변경되어 대기를 종료했습니다.");
+    try {
+      let buttonDeadline = performance.now() + 30000;
+      while (await mayContinue(token)) {
+        if (!sameSelection()) {
+          await finish("선택한 회차가 변경되어 예매를 중단했습니다.");
           return;
         }
-        await save({...state, phase: "handoff", attemptId: crypto.randomUUID(), message: "예매 화면 이동이 확인되지 않으면 페이지의 ‘예매하기’를 직접 눌러 주세요."});
-        if (await mayContinue(token) && sameSelection()) await clickButton(provider.findButton());
-        return;
-      }
-      const loading = gate && provider.isLoading?.();
-      if (loading) {
-        buttonDeadline = null;
-      } else if (buttonDeadline === null) {
-        buttonDeadline = performance.now() + 30000;
-      } else if (performance.now() >= buttonDeadline) {
-        if (gate && !state.gateRefreshed) {
-          await save({...state, phase: "refreshing", gateRefreshed: true, message: "판매 상태를 새로 확인합니다."});
-          if (await mayContinue(token)) location.reload();
+        if (provider.findButton()) {
+          const announced = provider.inspect(siteNow());
+          // 초 단위 카운트다운 오차는 일정 변경으로 보지 않는다.
+          if (announced.opening && announced.opening > siteNow() + 5000) {
+            await finish("일반예매 오픈 일정이 변경되어 대기를 종료했습니다.");
+            return;
+          }
+          await save({...state, phase: "handoff", attemptId: crypto.randomUUID(), message: "예매 화면 이동이 확인되지 않으면 페이지의 ‘예매하기’를 직접 눌러 주세요."});
+          if (await mayContinue(token) && sameSelection()) await clickButton(provider.findButton());
           return;
         }
-        await finish("30초 동안 활성 예매 버튼을 찾지 못해 대기를 종료했습니다. 페이지에서 판매 일정을 확인해 주세요.");
-        return;
+        const loading = gate && provider.isLoading?.();
+        if (loading) {
+          buttonDeadline = null;
+        } else if (buttonDeadline === null) {
+          buttonDeadline = performance.now() + 30000;
+        } else if (performance.now() >= buttonDeadline) {
+          if (gate && !state.gateRefreshed) {
+            await save({...state, phase: "refreshing", gateRefreshed: true, message: "판매 상태를 새로 확인합니다."});
+            if (await mayContinue(token)) location.reload();
+            return;
+          }
+          await finish("30초 동안 활성 예매 버튼을 찾지 못해 대기를 종료했습니다. 페이지에서 판매 일정을 확인해 주세요.");
+          return;
+        }
+        const fast = performance.now() - started < 5000;
+        await new Promise(resolve => setTimeout(resolve, loading ? 200 : fast ? 25 : 100));
       }
-      await new Promise(resolve => setTimeout(resolve, loading ? 1000 : 200));
+    } finally {
+      // 클릭으로 이어지지 않았다면 미리 붙인 디버거를 해제한다.
+      if (state?.phase !== "handoff") globalThis.mecroReleaseClick?.();
     }
   }
   function schedule(deadline, token) {
@@ -116,9 +127,11 @@ globalThis.startBookingWait = function startBookingWait(provider) {
           if (!await mayContinue(token)) return;
           deadline = performance.now() + state.opening - siteNow();
         }
+        // 게이트는 오픈 3초 전부터 버튼을 확인해 초 단위 시계 오차를 흡수한다.
+        const lead = gate ? 3000 : 0;
         const remaining = deadline - performance.now();
-        if (remaining > 0) {
-          timer = setTimeout(tick, Math.min(remaining, 30000));
+        if (remaining > lead) {
+          timer = setTimeout(tick, Math.min(remaining - lead, 30000));
           return;
         }
         if (gate) {
@@ -168,6 +181,7 @@ globalThis.startBookingWait = function startBookingWait(provider) {
   addEventListener("pagehide", () => {
     generation++;
     clearTimeout(timer);
+    globalThis.mecroReleaseClick?.();
   });
   globalThis.navigation?.addEventListener("currententrychange", () => {
     if (product === location.origin + location.pathname) return;

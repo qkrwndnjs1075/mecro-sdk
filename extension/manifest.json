@@ -7,7 +7,7 @@
     "48": "icons/ticket-48.png",
     "128": "icons/ticket-128.png"
   },
-  "version": "0.3.0",
+  "version": "0.3.1",
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
